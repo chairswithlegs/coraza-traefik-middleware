@@ -24,5 +24,6 @@ jobs:
       - name: Integration tests
         run: |
           docker compose up -d --build
+          sleep 10
           go test -tags=integration ./tests/
           docker compose down

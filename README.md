@@ -60,6 +60,16 @@ Use `trustForwardHeader: true` so the middleware sees the original client IP and
 
 ## Building and running
 
+**Pre-built image (GitHub Container Registry):**
+
+A container image is published to [GitHub Container Registry](https://ghcr.io) on each [release](https://github.com/chairswithlegs/coraza-traefik-middleware/releases). Pull a specific version or `latest`:
+
+```bash
+docker pull ghcr.io/chairswithlegs/coraza-traefik-middleware:v1.0.0
+# or
+docker pull ghcr.io/chairswithlegs/coraza-traefik-middleware:latest
+```
+
 **Local (no Docker):**
 
 ```bash
