@@ -20,6 +20,8 @@ var (
 	processingJobIntervalStr = getEnvOrDefault("AUDIT_LOG_PROCESSING_JOB_INTERVAL", "10s")
 	auditLogPath             = getEnvOrDefault("AUDIT_LOG_PATH", "/var/log/coraza-audit.log")
 	logLevel                 = getEnvOrDefault("LOG_LEVEL", "info")
+	wafPort                  = getEnvOrDefault("WAF_PORT", "8080")
+	adminPort                = getEnvOrDefault("ADMIN_PORT", "8081")
 )
 
 func main() {
@@ -50,18 +52,7 @@ func getEnvOrDefault(envVar string, defaultValue string) string {
 }
 
 func runServersInBackground(wafHandler http.Handler, adminHandler http.Handler) (wafServer *http.Server, adminServer *http.Server) {
-	wafPort := ":8080"
-	if envWafPort := os.Getenv("WAF_PORT"); envWafPort != "" {
-		wafPort = ":" + envWafPort
-	}
-
-	adminPort := ":8081"
-	if envAdminPort := os.Getenv("ADMIN_PORT"); envAdminPort != "" {
-		adminPort = ":" + envAdminPort
-	}
-
 	// Start the servers
-
 	wafServer = &http.Server{
 		Addr:              wafPort,
 		Handler:           wafHandler,
