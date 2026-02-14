@@ -1,0 +1,28 @@
+http:
+  routers:
+    # A rule protected by WAF
+    whoami:
+      rule: PathPrefix(`/`)
+      service: whoami
+      entryPoints:
+        - web
+      middlewares:
+        - coraza
+    # A rule that bypasses WAF
+    whoami-no-waf:
+      rule: PathPrefix(`/`) && Header(`X-WAF-Disabled`, `true`)
+      service: whoami
+      entryPoints:
+        - web
+
+  services:
+    whoami:
+      loadBalancer:
+        servers:
+          - url: http://whoami:80
+
+  middlewares:
+    coraza:
+      forwardAuth:
+        address: "http://coraza-traefik-middleware:8080"
+        trustForwardHeader: true
