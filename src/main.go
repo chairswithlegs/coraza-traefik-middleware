@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -20,6 +21,8 @@ var (
 	processingJobIntervalStr = getEnvOrDefault("AUDIT_LOG_PROCESSING_JOB_INTERVAL", "10s")
 	auditLogPath             = getEnvOrDefault("AUDIT_LOG_PATH", "/var/log/coraza-audit.log")
 	logLevel                 = getEnvOrDefault("LOG_LEVEL", "info")
+	wafPort                  = getEnvOrDefault("WAF_PORT", "8080")
+	adminPort                = getEnvOrDefault("ADMIN_PORT", "8081")
 )
 
 func main() {
@@ -50,20 +53,9 @@ func getEnvOrDefault(envVar string, defaultValue string) string {
 }
 
 func runServersInBackground(wafHandler http.Handler, adminHandler http.Handler) (wafServer *http.Server, adminServer *http.Server) {
-	wafPort := ":8080"
-	if envWafPort := os.Getenv("WAF_PORT"); envWafPort != "" {
-		wafPort = ":" + envWafPort
-	}
-
-	adminPort := ":8081"
-	if envAdminPort := os.Getenv("ADMIN_PORT"); envAdminPort != "" {
-		adminPort = ":" + envAdminPort
-	}
-
 	// Start the servers
-
 	wafServer = &http.Server{
-		Addr:              wafPort,
+		Addr:              fmt.Sprintf(":%s", wafPort),
 		Handler:           wafHandler,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      10 * time.Second,
@@ -71,7 +63,7 @@ func runServersInBackground(wafHandler http.Handler, adminHandler http.Handler) 
 		IdleTimeout:       60 * time.Second,
 	}
 	adminServer = &http.Server{
-		Addr:              adminPort,
+		Addr:              fmt.Sprintf(":%s", adminPort),
 		Handler:           adminHandler,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      10 * time.Second,
