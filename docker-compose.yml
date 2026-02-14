@@ -1,0 +1,47 @@
+name: coraza-traefik-middleware
+
+services:
+  traefik:
+    image: "traefik:v3.5"
+    container_name: "traefik"
+    command:
+      - "--providers.docker=true"
+      - "--providers.docker.exposedbydefault=false"
+      - "--configFile=/etc/traefik/traefik-config-static.yml"
+    ports:
+      - "8000:8000"
+    volumes:
+      - "/var/run/docker.sock:/var/run/docker.sock:ro"
+      - "./tests/testdata:/etc/traefik" # Allow access to the Traefik config files
+
+  coraza_traefik_middleware:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: "coraza-traefik-middleware"
+    ports:
+      - "8080:8080"
+      - "8081:8081"
+    environment:
+      WAF_PORT: "8080"
+      ADMIN_PORT: "8081"
+      LOG_LEVEL: "debug"
+      AUDIT_LOG_EXPIRATION: "30m"
+      AUDIT_LOG_EXPIRATION_JOB_INTERVAL: "1m"
+      DIRECTIVES: |
+        SecDebugLog /dev/stdout
+        SecDebugLogLevel 3
+        Include @coraza.conf-recommended
+        SecDefaultAction phase:1,log,auditlog,pass
+        SecDefaultAction phase:2,log,auditlog,pass
+        SecAction id:900990,phase:1,pass,t:none,nolog,tag:'OWASP_CRS',ver:'OWASP_CRS/4.17.1',setvar:tx.crs_setup_version=4171
+        Include @owasp_crs/*.conf
+        SecRuleEngine On
+
+  whoami:
+    image: "traefik/whoami"
+    container_name: "simple-service"
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.whoami.rule=Host(`localhost`)"
+      - "traefik.http.routers.whoami.entrypoints=web"
