@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"os"
@@ -54,7 +55,7 @@ func getEnvOrDefault(envVar string, defaultValue string) string {
 func runServersInBackground(wafHandler http.Handler, adminHandler http.Handler) (wafServer *http.Server, adminServer *http.Server) {
 	// Start the servers
 	wafServer = &http.Server{
-		Addr:              wafPort,
+		Addr:              fmt.Sprintf(":%s", wafPort),
 		Handler:           wafHandler,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      10 * time.Second,
@@ -62,7 +63,7 @@ func runServersInBackground(wafHandler http.Handler, adminHandler http.Handler) 
 		IdleTimeout:       60 * time.Second,
 	}
 	adminServer = &http.Server{
-		Addr:              adminPort,
+		Addr:              fmt.Sprintf(":%s", adminPort),
 		Handler:           adminHandler,
 		ReadTimeout:       10 * time.Second,
 		WriteTimeout:      10 * time.Second,
