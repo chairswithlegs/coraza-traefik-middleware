@@ -32,31 +32,21 @@
 ## Traefik setup
 
 1. Run the middleware (e.g. via Docker) so it listens on `WAF_PORT` (e.g. `8080`).
-2. Add a **forwardAuth** middleware in your Traefik config pointing at the middleware URL.
-
-Example dynamic configuration (YAML):
+2. Add a **forwardAuth** middleware in your Traefik config (as shown below).
 
 ```yaml
-http:
-  middlewares:
-    coraza:
-      forwardAuth:
-        address: "http://coraza-traefik-middleware:8080"
-        trustForwardHeader: true
-  routers:
-    myapp:
-      rule: "Host(`example.com`)"
-      service: myapp
-      middlewares:
-        - coraza
-  services:
-    myapp:
-      loadBalancer:
-        servers:
-          - url: "http://backend:80"
+apiVersion: traefik.io/v1alpha1
+kind: Middleware
+metadata:
+  name: coraza-traefik-middleware
+  namespace: coraza
+spec:
+  forwardAuth:
+    address: http://coraza-traefik-middleware.coraza.svc.cluster.local:8080
+    forwardBody: true
 ```
 
-Use `trustForwardHeader: true` so the middleware sees the original client IP and request details via `X-Forwarded-*` headers.
+3. Add the middleware to your Traefik entrypoints.
 
 ## Building and running
 
