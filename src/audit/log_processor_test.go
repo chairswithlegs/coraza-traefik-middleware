@@ -1,7 +1,11 @@
 package audit
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
+	"log/slog"
 	"os"
 	"path"
 	"testing"
@@ -41,6 +45,64 @@ func TestLogProcessor(t *testing.T) {
 
 	assert.Len(t, logs, 4, "Expected four logs to be processed")
 	assert.Equal(t, "EcNxIrskXYJttXoioLH", logs[0].Transaction.ID)
+}
+
+func TestProcessLogFileSummarizesFailures(t *testing.T) {
+	tempDir := t.TempDir()
+	logFile := path.Join(tempDir, "audit.log")
+
+	content := `{"transaction":{"id":"ok"},"messages":[{"data":{"id":1}}]}
+
+not json
+{"transaction":{"id":"fail"},"messages":[{"data":{"id":2}}]}
+`
+	err := os.WriteFile(logFile, []byte(content), 0644)
+	assert.NoError(t, err)
+
+	var buf bytes.Buffer
+	processor := NewLogProcessor(AuditLogProcessorOptions{AuditLogPath: logFile})
+	processor.logger = slog.New(slog.NewJSONHandler(&buf, nil))
+	processor.logHandler = func(l Log) error {
+		if l.Transaction.ID == "fail" {
+			return errors.New("handler failed")
+		}
+		return nil
+	}
+
+	// Per-entry failures are summarized rather than returned
+	err = processor.ProcessLogFile(logFile)
+	assert.NoError(t, err)
+
+	var summary map[string]any
+	err = json.Unmarshal(buf.Bytes(), &summary)
+	assert.NoError(t, err, "Expected a single summary log line")
+	assert.Equal(t, "WARN", summary["level"])
+	assert.EqualValues(t, 3, summary["entries"], "Expected blank lines to be skipped")
+	assert.EqualValues(t, 1, summary["violations"], "Expected only successfully handled violations to be counted")
+	assert.EqualValues(t, 1, summary["parse_errors"])
+	assert.EqualValues(t, 1, summary["handler_errors"])
+	assert.Contains(t, summary["first_error"], "failed to parse log entry")
+}
+
+func TestProcessLogFileAllEntriesFailed(t *testing.T) {
+	tempDir := t.TempDir()
+	logFile := path.Join(tempDir, "audit.log")
+
+	err := os.WriteFile(logFile, []byte("not json\nalso not json\n"), 0644)
+	assert.NoError(t, err)
+
+	var buf bytes.Buffer
+	processor := NewLogProcessor(AuditLogProcessorOptions{AuditLogPath: logFile})
+	processor.logger = slog.New(slog.NewJSONHandler(&buf, nil))
+
+	err = processor.ProcessLogFile(logFile)
+	assert.NoError(t, err)
+
+	var summary map[string]any
+	err = json.Unmarshal(buf.Bytes(), &summary)
+	assert.NoError(t, err, "Expected a single summary log line")
+	assert.Equal(t, "ERROR", summary["level"])
+	assert.EqualValues(t, 2, summary["parse_errors"])
 }
 
 func TestRotateAuditLogs(t *testing.T) {

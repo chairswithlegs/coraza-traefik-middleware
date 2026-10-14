@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -100,8 +99,6 @@ func (p *LogProcessor) StartProcessingJob() {
 				continue
 			}
 
-			p.logger.Info("Detected audit log data, starting processing")
-
 			filename, err := p.rotateLogs()
 			if err != nil {
 				p.logger.Error("Failed to rotate audit log", "error", err)
@@ -164,8 +161,12 @@ func (p *LogProcessor) Stop(ctx context.Context) error {
 	}
 }
 
+// ProcessLogFile processes each entry in the given audit log file. Individual entries that fail to
+// parse or process are skipped and summarized in a single warning (or an error, if every entry
+// failed); an error is only returned if the file itself cannot be read.
 func (p *LogProcessor) ProcessLogFile(filename string) error {
-	p.logger.Info("Processing audit log file", "file", filename)
+	p.logger.Debug("Processing audit log file", "file", filename)
+	start := time.Now()
 
 	file, err := os.Open(filename)
 	if err != nil {
@@ -174,34 +175,60 @@ func (p *LogProcessor) ProcessLogFile(filename string) error {
 	defer file.Close()
 
 	scanner := bufio.NewScanner(file)
-	processingErrors := false
+	var entries, violations, parseErrors, handlerErrors int
+	var firstErr error
 
 	for scanner.Scan() {
-		var logEntry Log
 		line := scanner.Text()
-		p.logger.Debug("Processing audit log entry", "line", line)
+		if strings.TrimSpace(line) == "" {
+			continue
+		}
+		entries++
+		var logEntry Log
 
 		if err := json.Unmarshal([]byte(line), &logEntry); err != nil {
-			p.logger.Warn("Failed to parse log entry, skipping", "error", err, "line", line)
-			processingErrors = true
+			p.logger.Debug("Failed to parse audit log entry, skipping", "error", err, "line", line)
+			parseErrors++
+			if firstErr == nil {
+				firstErr = fmt.Errorf("failed to parse log entry: %w", err)
+			}
 			continue
 		}
 
 		if err := p.logHandler(logEntry); err != nil {
-			p.logger.Warn("Failed to process log entry", "error", err)
-			processingErrors = true
+			p.logger.Debug("Failed to handle audit log entry", "error", err, "id", logEntry.Transaction.ID)
+			handlerErrors++
+			if firstErr == nil {
+				firstErr = fmt.Errorf("failed to handle log entry %s: %w", logEntry.Transaction.ID, err)
+			}
+			continue
+		}
+
+		if len(logEntry.Messages) > 0 {
+			violations++
 		}
 	}
 
-	if processingErrors {
-		return errors.New("errors occurred during log processing")
-	}
-
 	if err = scanner.Err(); err != nil {
-		return fmt.Errorf("failed to read log file: %w", err)
+		return fmt.Errorf("failed to read log file after %d entries: %w", entries, err)
 	}
 
-	p.logger.Info("Completed processing audit log file", "file", filename)
+	summary := []any{
+		"file", filename,
+		"entries", entries,
+		"violations", violations,
+		"parse_errors", parseErrors,
+		"handler_errors", handlerErrors,
+		"duration", time.Since(start).String(),
+	}
+	if failures := parseErrors + handlerErrors; failures > 0 && failures == entries {
+		p.logger.Error("All entries failed while processing audit log file", append(summary, "first_error", firstErr)...)
+	} else if firstErr != nil {
+		p.logger.Warn("Errors occurred while processing audit log file", append(summary, "first_error", firstErr)...)
+	} else {
+		p.logger.Debug("Completed processing audit log file", summary...)
+	}
+
 	return nil
 }
 
@@ -239,7 +266,7 @@ func (p *LogProcessor) rotateLogs() (filename string, err error) {
 }
 
 func (p *LogProcessor) expireBackupLogFiles() error {
-	p.logger.Info("Checking for expired audit log files to delete", "expiration", p.LogExpiration.String())
+	p.logger.Debug("Checking for expired audit log files to delete", "expiration", p.LogExpiration.String())
 
 	files, err := os.ReadDir(p.auditLogDir)
 	if err != nil {
@@ -247,6 +274,7 @@ func (p *LogProcessor) expireBackupLogFiles() error {
 	}
 
 	now := time.Now()
+	deleted := 0
 	for _, file := range files {
 		if file.IsDir() || !file.Type().IsRegular() {
 			continue
@@ -267,9 +295,14 @@ func (p *LogProcessor) expireBackupLogFiles() error {
 			if err := os.Remove(fullPath); err != nil {
 				p.logger.Warn("Failed to delete expired audit log file", "file", fullPath, "error", err)
 			} else {
-				p.logger.Info("Deleted expired audit log file", "file", fullPath)
+				p.logger.Debug("Deleted expired audit log file", "file", fullPath)
+				deleted++
 			}
 		}
+	}
+
+	if deleted > 0 {
+		p.logger.Info("Deleted expired audit log files", "count", deleted, "expiration", p.LogExpiration.String())
 	}
 
 	return nil
@@ -289,6 +322,12 @@ func (p *LogProcessor) checkIfLogsExist() (bool, error) {
 		return false, nil
 	}
 	return true, nil
+}
+
+// ruleMatch is the structured representation of a matched rule in the "Rule violations" log
+type ruleMatch struct {
+	RuleID  string `json:"rule_id"`
+	Message string `json:"message"`
 }
 
 func (p *LogProcessor) defaultLogHandler(log Log) error {
@@ -312,12 +351,12 @@ func (p *LogProcessor) defaultLogHandler(log Log) error {
 		)
 	}
 
-	rules := make([]string, 0, len(log.Messages))
+	rules := make([]ruleMatch, 0, len(log.Messages))
 	for _, msg := range log.Messages {
-		rules = append(rules,
-			"rule_id", fmt.Sprintf("%s-%d", msg.Data.File, msg.Data.ID),
-			"message", msg.Data.Msg,
-		)
+		rules = append(rules, ruleMatch{
+			RuleID:  fmt.Sprintf("%s-%d", msg.Data.File, msg.Data.ID),
+			Message: msg.Data.Msg,
+		})
 	}
 	logFields = append(logFields, "rules", rules)
 	p.logger.Warn("Rule violations", logFields...)
